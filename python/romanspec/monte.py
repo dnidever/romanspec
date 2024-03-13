@@ -12,9 +12,9 @@ import doppler
 import traceback
 from . import utils
 
-class BOSSSyn():
+class RomanSyn():
 
-    # model BOSS nirspec spectra
+    # model Roman spectra
     
     def __init__(self,spobs=None,loggrelation=False,fluxed=False,verbose=False):
         # Load the ANN models
@@ -273,7 +273,7 @@ class BOSSSyn():
         if fluxed==False:
             spsyn.normalized = True
             spsyn._cont = np.ones(spsyn.flux.shape)
-        # Convolve to BOSS resolution and wavelength
+        # Convolve to Roman resolution and wavelength
         if spobs is None:
             spmonte = spsyn.prepare(self._spobs)
         else:
@@ -351,7 +351,7 @@ class BOSSSyn():
         Example
         -------
 
-        jac = BOSSSyn.jac(wave,*pars)
+        jac = RomanSyn.jac(wave,*pars)
 
         """
 
@@ -432,7 +432,7 @@ class BOSSSyn():
         Example
         -------
 
-        tab = bsyn.fit(spec)
+        tab = rsyn.fit(spec)
 
         """
 
@@ -607,8 +607,8 @@ class BOSSSyn():
 def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,normalize=False,verbose=True):
     """ Simple Monte Carlo test to recover elemental abundances."""
 
-    # Initialize BOSS spectral simulation object
-    bsyn = BOSSSyn(fluxed=fluxed)
+    # Initialize Roman spectral simulation object
+    rsyn = RomanSyn(fluxed=fluxed)
 
     if params is None:
         params = {'teff':4000.0,'logg':2.0,'mh':0.0,'cm':0.1}
@@ -622,9 +622,9 @@ def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,normalize=Fals
     tab = Table(np.zeros(nmonte,dtype=np.dtype(dt)))
     for i in range(nmonte):
         print('---- Mock {:d} ----'.format(i+1))
-        sp = bsyn(params,snr=snr)
+        sp = rsyn(params,snr=snr)
         try:
-            out = bsyn.fit(sp,fitparams=fitparams,initgrid=initgrid,
+            out = rsyn.fit(sp,fitparams=fitparams,initgrid=initgrid,
                            normalize=normalize,verbose=verbose)
             tab['ind'][i] = i+1
             tab['snr'][i] = out['snr']
@@ -656,12 +656,12 @@ def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,normalize=Fals
 
 def test():
 
-    # Simulate fake BOSS data with ANN model
+    # Simulate fake Roman data with ANN model
     em = Emulator.read('/Users/nidever/synspec/nodegrid/grid8/grid8_annmodel_300neurons_0.0001rate_20000steps.pkl')
     npix_syn = 22001
     wsyn = np.arange(npix_syn)*0.5+9000
 
-    # need to convolve with the BOSS LSF
+    # need to convolve with the Roman LSF
 
     wobs_coef = np.array([-1.51930967e-09, -5.46761333e-06,  2.39684716e+00,  8.99994494e+03])
     # 3847 pixels

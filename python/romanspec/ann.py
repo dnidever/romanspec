@@ -13,9 +13,9 @@ from . import utils
 
 cspeed = 2.99792458e5  # speed of light in km/s
 
-class BOSSANNModel():
+class RomanANNModel():
 
-    # Model BOSS nirspec spectra using ANN model
+    # Model Roman spectra using ANN model
     
     def __init__(self,spobs=None,loggrelation=False,verbose=False):
         # Load the ANN models
@@ -210,7 +210,7 @@ class BOSSANNModel():
     def __call__(self,pars=None,spobs=None,snr=None,vrel=None,normalize=False,
                  fluxed=False,fiducial=False):
         """
-        Returns BOSS model spectrum.
+        Returns Roman model spectrum.
 
         Parameters
         ----------
@@ -227,17 +227,17 @@ class BOSSANNModel():
         fluxed : bool, optional
            Make the spectrum fluxed, i.e. add continuum.  Default is False.
         fiducial : bool, optional
-           Use fiducial BOSS resolution and wavelength values.
+           Use fiducial Roman resolution and wavelength values.
 
         Returns
         -------
         spec : Spec1D
-           BOSS model spectrum.
+           Roman model spectrum.
 
         Example
         -------
 
-        spec = jw(pars)
+        spec = roman(pars)
 
         """
         # If no pars input, use mean values
@@ -356,7 +356,7 @@ class BOSSANNModel():
         Example
         -------
 
-        jac = BOSSSyn.jac(wave,*pars)
+        jac = RomanSyn.jac(wave,*pars)
 
         """
 
