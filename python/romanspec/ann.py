@@ -19,9 +19,9 @@ class RomanANNModel():
     
     def __init__(self,spobs=None,loggrelation=False,verbose=False):
         # Load the ANN models
-        em1 = Emulator.read(utils.datadir()+'ann_23pars_3500-4200.pkl')
-        em2 = Emulator.read(utils.datadir()+'ann_23pars_4000-5000.pkl')
-        em3 = Emulator.read(utils.datadir()+'ann_23pars_4900-6000.pkl')
+        em1 = Emulator.read(utils.datadir()+'ann_29pars_3500-4200.pkl')
+        em2 = Emulator.read(utils.datadir()+'ann_29pars_4000-5000.pkl')
+        em3 = Emulator.read(utils.datadir()+'ann_29pars_4900-6000.pkl')
         self._models = [em1,em2,em3]
         self.nmodels = len(self._models)
         self.labels = self._models[0].label_names
@@ -52,8 +52,8 @@ class RomanANNModel():
         self._spobs = spobs
         
         # ANN model wavelengths
-        npix_model = 14001
-        self._dispersion = np.arange(npix_model)*0.5+3500.0
+        npix_syn = 22001
+        self._wsyn = np.arange(npix_syn)*0.5+9000
 
         # Get logg label
         loggind, = np.where(np.char.array(self.labels).lower()=='logg')
@@ -196,15 +196,19 @@ class RomanANNModel():
         return rndpars
 
     def fiducialspec(self):
-        """ Default BOSS resolution and wavelength spectrum."""
-        # Default observed spectrum            
-        wobs_coef = np.array([-1.51930967e-09, -5.46761333e-06,  2.39684716e+00,  8.99994494e+03])            
-        # 3847 observed pixels
-        npix_obs = 3847
+        """ Default Roman resolution and wavelength spectrum."""
+        # Default observed spectrum
+        # The Roman WFI slitless grism has a spectral range of 1.00-1.93 microns
+        # and a dispersion of about 1.1 nm/pixel, essentially independent of
+        # wavelength, yielding a 2-pixel resolving power of R = lambda / dlambda =
+        # 460 lambda / um for a point source
+        wobs_coef = np.array([11.0, 1e4])  # in Angstroms
+        # 847 observed pixels
+        npix_obs = 847
         wobs = np.polyval(wobs_coef,np.arange(npix_obs))
         spobs = Spec1D(np.zeros(npix_obs),wave=wobs,err=np.ones(npix_obs),
-                       lsfpars=np.array([ 1.05094118e+00, -3.37514635e-06]),
-                       lsftype='Gaussian',lsfxtype='wave')        
+                       lsfpars=np.array([2.0/2.35]),
+                       lsftype='Gaussian',lsfxtype='pixel')        
         return spobs
     
     def __call__(self,pars=None,spobs=None,snr=None,vrel=None,normalize=False,

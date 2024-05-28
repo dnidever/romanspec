@@ -12,6 +12,8 @@ import doppler
 import traceback
 from . import utils
 
+cspeed = 2.99792458e5  # speed of light in km/s
+
 class RomanSyn():
 
     # model Roman spectra
@@ -52,14 +54,22 @@ class RomanSyn():
             self._spobs = spobs
         # Default observed spectrum            
         else:
-            spobs = doppler.read(utils.datadir()+'spec-3586-55181-0500.fits')
-            spobs.flux = np.zeros(spobs.npix)
-            spobs.err = np.ones(spobs.npix)            
+            # The Roman WFI slitless grism has a spectral range of 1.00-1.93 microns
+            # and a dispersion of about 1.1 nm/pixel, essentially independent of
+            # wavelength, yielding a 2-pixel resolving power of R = lambda / dlambda =
+            # 460 lambda / um for a point source
+            wobs_coef = np.array([11.0, 1e4])  # in Angstroms
+            # 847 observed pixels
+            npix_obs = 847
+            wobs = np.polyval(wobs_coef,np.arange(npix_obs))
+            spobs = Spec1D(np.zeros(npix_obs),wave=wobs,err=np.ones(npix_obs),
+                           lsfpars=np.array([2.0/2.35]),
+                           lsftype='Gaussian',lsfxtype='pixel')        
             self._spobs = spobs
 
         # Synthetic wavelengths
-        npix_syn = 14001
-        self._wsyn = np.arange(npix_syn)*0.5+3500.0
+        npix_syn = 22001
+        self._wsyn = np.arange(npix_syn)*0.5+9000
 
         # Get logg label
         loggind, = np.where(np.char.array(self.labels).lower()=='logg')
@@ -78,6 +88,7 @@ class RomanSyn():
         self.njac = 0
         self._wobs = None
         self.normalize = False
+        self.vrel = None
         
     def mklabels(self,pars):
         """ Make the labels array from a dictionary."""
@@ -130,6 +141,9 @@ class RomanSyn():
                 ind = self._alphaindex.copy()
                 bounds[0][i] = np.max(self.ranges[ind,0])
                 bounds[1][i] = np.min(self.ranges[ind,1])
+            elif params[i].lower()=='rv':
+                bounds[0][i] = -800
+                bounds[1][i] = -800                
             else:
                 ind, = np.where(np.array(self.labels)==params[i].lower())
                 bounds[0][i] = self.ranges[ind,0]
@@ -185,14 +199,17 @@ class RomanSyn():
         nparams = len(params)
         rndpars = np.zeros((n,nparams),float)
         for i in range(nparams):
-            if params[i]!='alpham':
-                ind, = np.where(np.array(self.labels)==params[i])
-                vmin = self.ranges[ind,0]
-                vmax = self.ranges[ind,1]                
-            else:
+            if params[i]=='alpham':
                 ind = self._alphaindex.copy()
                 vmin = np.max(self.ranges[ind,0])
-                vmax = np.min(self.ranges[ind,1])
+                vmax = np.min(self.ranges[ind,1])                
+            elif params[i]=='rv':
+                vmin = -800
+                vmax = 800
+            else:
+                ind, = np.where(np.array(self.labels)==params[i])
+                vmin = self.ranges[ind,0]
+                vmax = self.ranges[ind,1]
             vrange = vmax-vmin
             # make a small buffer
             vmin += vrange*0.01
@@ -257,6 +274,8 @@ class RomanSyn():
                 flux *= 10000/flux[midind]
             
         # Doppler shift
+        if vrel is None and self.vrel is not None:
+            vrel = self.vrel
         if vrel is not None and vrel != 0.0:
             redwave = wave*(1+vrel/cspeed)
             orig_flux = flux.copy()
@@ -403,7 +422,7 @@ class RomanSyn():
         
     
     def fit(self,spec,fitparams=None,loggrelation=False,normalize=False,
-            initgrid=True,outlier=False,verbose=False,estimates=None):
+            initgrid=True,outlier=False,dorv=False,verbose=False,estimates=None):
         """
         Fit an observed spectrum with the ANN models and curve_fit.
 
@@ -437,9 +456,10 @@ class RomanSyn():
         """
 
         vrel = 0.0
+        vrelerr = 0.0
         spec.vrel = vrel
         if verbose:
-            print('Vrel: {:.2f} km/s'.format(vrel))
+            #print('Vrel: {:.2f} km/s'.format(vrel))
             print('S/N: {:.2f}'.format(spec.snr))
         # Now normalize
         if normalize:
@@ -495,6 +515,7 @@ class RomanSyn():
                print('Testing an initial set of '+str(gridpars.shape[0])+' random parameters')
             
             # Make the models
+            vrelarr = np.zeros(gridpars.shape[0],float)
             for i in range(gridpars.shape[0]):
                 tpars1 = {}
                 for j in range(len(self.fitparams)):
@@ -503,9 +524,24 @@ class RomanSyn():
                 if i==0:
                     synflux = np.zeros((gridpars.shape[0],sp1.size),float)
                 synflux[i,:] = sp1.flux
+                if dorv:
+                    vrelarr2 = np.linspace(-400,400,30)  #+bestvrel
+                    chisqarr2 = np.zeros(len(vrelarr2),float)
+                    for j in range(len(vrelarr2)):
+                        sp1 = self(tpars1,vrel=vrelarr2[j])
+                        chisqarr2[j] = np.sum((sp1.flux-spec.flux)**2/spec.err**2)
+                    vrelarr3 = np.linspace(-400,400,1000)
+                    chisqarr3 = dln.interp(vrelarr2,chisqarr2,vrelarr3,kind='quadratic')
+                    bestind2 = np.argmin(chisqarr3)
+                    vrel1 = vrelarr3[bestind2]
+                    #out = doppler.rv.specxcorr(spec.wave,sp1.flux,spec.flux,spec.err,11)
+                    #vrel1 = out['vrel'][0]
+                    vrelarr[i] = vrel1
+                    sp1 = self(tpars1,vrel=vrel1)
             chisqarr = np.sum((synflux-spec.flux)**2/spec.err**2,axis=1)/spec.size
             bestind = np.argmin(chisqarr)
             estimates = gridpars[bestind,:]
+            bestvrel = vrelarr[bestind]
         else:
             # Get initial estimates if not input
             if estimates is None:
@@ -519,14 +555,39 @@ class RomanSyn():
 
         if verbose:
             print('Initial estimates: ',estimates)
-            
+            if dorv:
+                print('RV:',bestvrel)
+
         try:
+            self.vrel = bestvrel
             pars,pcov = curve_fit(self.model,spec.wave,spec.flux,p0=estimates,
                                   sigma=spec.err,bounds=bounds,jac=self.jac)
             perror = np.sqrt(np.diag(pcov))
             bestmodel = self.model(spec.wave,*pars)
             chisq = np.sum((spec.flux-bestmodel)**2/spec.err**2)/spec.size
             
+            # Do xcorr with best model
+            if dorv:
+                self.vrel = 0.0
+                sptemp = self(pars)
+                # maybe test about ~20-30 finer RV samples around the best one
+                vrelarr2 = np.linspace(-400,400,100)  #+bestvrel
+                chisqarr2 = np.zeros(len(vrelarr2),float)
+                for j in range(len(vrelarr2)):
+                    sp1 = self(tpars1,vrel=vrelarr2[j])
+                    chisqarr2[j] = np.sum((sp1.flux-spec.flux)**2/spec.err**2)
+                vrelarr3 = np.linspace(-400,400,1000)
+                chisqarr3 = dln.interp(vrelarr2,chisqarr2,vrelarr3,kind='quadratic')
+                bestind2 = np.argmin(chisqarr3)
+                vrel = vrelarr3[bestind2]
+                gd, = np.where(chisqarr3<=np.min(chisqarr3)+1)
+                vrelerr = np.ptp(vrelarr3[gd])*0.5
+                #out = doppler.rv.specxcorr(spec.wave,sptemp.flux,spec.flux,spec.err,11)
+                #vrel = out['vrel'][0]
+                #vrelerr = out['vrelerr'][0]
+                bestsp = self(pars,vrel=vrel)
+                bestmodel = self.model(spec.wave,*pars,vrel=vrel)   
+
             # Get full parameters
             if loggrelation:
                 fullpars = self.getlogg(pars)
@@ -538,10 +599,12 @@ class RomanSyn():
             if verbose:
                 print('Best parameters:')
                 self.printpars(fullpars,fullperror)
+                print('Vrel  :    {:.3f} +/- {:.3f} km/s'.format(vrel,vrelerr))
                 print('Chisq: {:.3f}'.format(chisq))
 
             # Construct the output dictionary
-            out = {'vrel':vrel,'snr':spec.snr,'pars':fullpars,'perror':fullperror,'wave':spec.wave,
+            out = {'vrel':vrel,'vrelerr':vrelerr,'snr':spec.snr,'pars':fullpars,
+                   'perror':fullperror,'wave':spec.wave,
                    'flux':spec.flux,'err':spec.err,'model':bestmodel,'chisq':chisq,
                    'loggrelation':loggrelation,'success':True}
             success = True
@@ -588,6 +651,7 @@ class RomanSyn():
                     if verbose:
                         print('Best parameters:')
                         self.printpars(fullpars,fullperror)
+                        print('Vrel  :    {:.3f} +/- {:.3f} km/s'.format(vrel,vrelerr))
                         print('Chisq: {:.3f}'.format(chisq))                        
                         
                     # Construct the output dictionary
@@ -604,7 +668,8 @@ class RomanSyn():
 
             
     
-def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,normalize=False,verbose=True):
+def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,
+          normalize=False,dorv=False,verbose=True):
     """ Simple Monte Carlo test to recover elemental abundances."""
 
     # Initialize Roman spectral simulation object
@@ -614,42 +679,72 @@ def monte(params=None,nmonte=50,snr=50,initgrid=True,fluxed=False,normalize=Fals
         params = {'teff':4000.0,'logg':2.0,'mh':0.0,'cm':0.1}
 
     fitparams = list(tuple(params.keys()))
+    #if dorv and 'rv' not in fitparams:
+    #    fitparams.append('rv')
     labels = list(tuple(params.keys()))
     truepars = [params[k] for k in params.keys()]
     nparams = len(fitparams)
-    dt = [('ind',int),('snr',float),('truepars',float,nparams),('pars',float,nparams),
-          ('perror',float,nparams),('chisq',float)]
+    if dorv:
+        dt = [('ind',int),('snr',float),('truepars',float,nparams+1),
+              ('pars',float,nparams+1),('perror',float,nparams+1),
+              ('chisq',float)]
+    else:
+        dt = [('ind',int),('snr',float),('truepars',float,nparams),
+              ('pars',float,nparams),('perror',float,nparams),('chisq',float)]
     tab = Table(np.zeros(nmonte,dtype=np.dtype(dt)))
     for i in range(nmonte):
         print('---- Mock {:d} ----'.format(i+1))
-        sp = rsyn(params,snr=snr)
+        # Add RV offset
+        if dorv:
+            rv = (np.random.rand(1)*250)[0]
+            print('rv=',rv)
+            sp = rsyn(params,snr=snr,vrel=rv)
+            truepars = [params[k] for k in params.keys()]
+            truepars.append(rv)
+        else:
+            sp = rsyn(params,snr=snr)
         try:
             out = rsyn.fit(sp,fitparams=fitparams,initgrid=initgrid,
-                           normalize=normalize,verbose=verbose)
+                           normalize=normalize,dorv=dorv,verbose=verbose)
             tab['ind'][i] = i+1
             tab['snr'][i] = out['snr']
             tab['truepars'][i] = truepars
-            tab['pars'][i] = out['pars']
-            tab['perror'][i] = out['perror']
             tab['chisq'][i] = out['chisq']
+            if dorv:
+                pars = out['pars']
+                pars = np.concatenate((pars,np.array([out['vrel']])))
+                perror = out['perror']
+                perror = np.concatenate((perror,np.array([out['vrelerr']])))
+                tab['pars'][i] = pars
+                tab['perror'][i] = perror
+            else:
+                tab['pars'][i] = out['pars']
+                tab['perror'][i] = out['perror']
         except:
             traceback.print_exc()
 
     # Figure out the bias and rms for each parameter
     print('\nFinal Monte Carlos Results')
     print('--------------------------')
-    dt = [('label',str,10),('nmonte',int),('value',float),('bias',float),('rms',float)]
+    if dorv:
+        labels.append('rv')
+        nparams += 1
+    dt = [('label',str,10),('nmonte',int),('value',float),('bias',float),
+          ('rms',float),('stdev',float)]
     res = Table(np.zeros(nparams,dtype=np.dtype(dt)))
     gd, = np.where(tab['snr']>0)  # only use ones that succeeded
     for i in range(nparams):
-        resid = tab['pars'][gd,i]-truepars[i]
+        resid = tab['pars'][gd,i]-tab['truepars'][gd,i]
         res['label'][i] = labels[i]
         res['nmonte'][i] = nmonte
         res['value'][i] = truepars[i]
         res['bias'][i] = np.median(resid)
         res['rms'][i] = np.sqrt(np.mean(resid**2))
-        sdata = res['label'][i],res['value'][i],res['bias'][i],res['rms'][i]
-        print('{:<7s}: value={:<10.2f} bias={:<10.3f} rms={:<10.3f}'.format(*sdata))
+        res['stdev'][i] = np.std(resid)        
+        sdata = (res['label'][i],res['value'][i],res['bias'][i],
+                 res['rms'][i],res['stdev'][i])
+        fmt = '{:<7s}: value={:<10.2f} bias={:<10.3f} rms={:<10.3f} std={:<10.3f}'
+        print(fmt.format(*sdata))
         
     return res,tab
     
